@@ -2283,6 +2283,24 @@ describe("OnboardingWizard restore-gate (stale localStorage across accounts)", (
       } finally { await act(async () => root.unmount()); }
     });
 
+    it("can switch back to subscriptions after leaving Custom API", async () => {
+      const { root } = await openStep4();
+      try {
+        await pickSource(/Custom API/);
+        await fillCustomApi();
+        const back = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Back")!;
+        await act(async () => back.click());
+        for (let i = 0; i < 10; i++) await flushReact();
+        const modeLink = document.querySelector('button[aria-label="Use subscription instead"]') as HTMLButtonElement;
+        await act(async () => modeLink.click());
+        await flushReact();
+        expect(document.querySelector('button[aria-label="Use API key instead"]')).not.toBeNull();
+        await pickSource(/OpenAI/);
+        expect(document.getElementById("onboarding-api-url")).toBeNull();
+        expect(document.querySelector('input[placeholder="Enter API key here"]')).toBeNull();
+      } finally { await act(async () => root.unmount()); }
+    });
+
     it("starts the claude_local sign-in on Connect when the signal reports no ready credential", async () => {
       mockAgentsApi.getAdapterAuthSignal.mockResolvedValue({ status: "absent" });
       const { root } = await openStep4({ adapterType: "claude_local" });

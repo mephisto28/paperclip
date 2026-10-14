@@ -2769,7 +2769,13 @@ function OnboardingWizardInner({
                       transition={{ opacity: SOURCE_LINK_EXIT, height: MAKE_ROOM }}
                     >
                       <div className="-ml-3 mt-1">
-                        <CredentialModeLink mode={credentialMode} onChange={setCredentialMode} />
+                        <CredentialModeLink mode={credentialMode} onChange={(mode) => {
+                          if (customApi) {
+                            setCustomApi(false);
+                            setApiKey("");
+                          }
+                          setCredentialMode(mode);
+                        }} />
                         {savedKeys.options.length > 0 && <p className="px-3 text-sm text-muted-foreground">{savedKeys.options.length} saved API {savedKeys.options.length === 1 ? "key available" : "keys available"}.</p>}
                         {credentialMode === "subscription" && authSignalStatus === "present" && <p className="px-3 text-sm text-muted-foreground">An existing provider connection is available.</p>}
                       </div>
