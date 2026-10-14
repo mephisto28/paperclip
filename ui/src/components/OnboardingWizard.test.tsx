@@ -1954,9 +1954,10 @@ describe("OnboardingWizard restore-gate (stale localStorage across accounts)", (
       const labels = [...document.body.querySelectorAll("button[aria-checked]")].map(
         (tile) => tile.textContent ?? "",
       );
-      expect(labels.length, "both recommended sources should render").toBe(2);
+      expect(labels.length, "recommended sources and a custom API should render").toBe(3);
       expect(labels.some((l) => l.includes("Claude"))).toBe(true);
       expect(labels.some((l) => l.includes("OpenAI"))).toBe(true);
+      expect(labels.some((l) => l.includes("Custom API"))).toBe(true);
       // The negative half is the one that fails on the unwired version: the
       // registry label is the adapter type, and it must not reach the tile.
       expect(labels.join(" ")).not.toContain("claude_local");
@@ -2124,6 +2125,163 @@ describe("OnboardingWizard restore-gate (stale localStorage across accounts)", (
       });
       for (let i = 0; i < 8; i++) await flushReact();
     }
+
+    async function fillCustomApi(baseUrl = "https://gateway.example.com/v1") {
+      for (const [id, value] of [
+        ["onboarding-api-url", baseUrl],
+        ["onboarding-api-model", "vendor/custom-model"],
+        ["onboarding-custom-api-key", "custom-test-key"],
+      ]) {
+        await act(async () => setControlledValue(document.getElementById(id) as HTMLInputElement, value));
+      }
+      await flushReact();
+    }
+
+    async function chooseCustomOption(id: string, label: string) {
+      await act(async () => (document.getElementById(id) as HTMLButtonElement).click());
+      const option = [...document.querySelectorAll('[role="option"]')].find((el) => el.textContent === label);
+      expect(option).toBeTruthy();
+      await act(async () => (option as HTMLElement).click());
+      await flushReact();
+    }
+
+    it.each([
+      ["OpenAI Responses · Codex", "responses", "codex_local", "openai", "vendor/custom-model"],
+      ["Anthropic Messages · Claude", "messages", "claude_local", "anthropic", "vendor/custom-model"],
+      ["Chat Completions · OpenCode", "chat", "opencode_local", "openai", "paperclip/vendor/custom-model"],
+    ])("connects a custom %s API with its explicit binding and model", async (label, protocol, adapterType, provider, model) => {
+      mockAdapterRegistry.list.push({ type: "opencode_local" });
+      const { root } = await openStep4();
+      try {
+        await pickSource(/Custom API/);
+        await chooseCustomOption("onboarding-api-format", label);
+        await fillCustomApi();
+        await pressArcPrimary();
+        expect(managedApi.create).toHaveBeenCalledTimes(1);
+        expect(managedApi.create).toHaveBeenCalledWith("company-new", expect.objectContaining({
+          provider, method: "api_key", apiKey: "custom-test-key", ownership: "personal",
+          routing: { kind: "gateway", protocol, auth: "bearer", baseUrl: "https://gateway.example.com/v1", models: [{ id: "vendor/custom-model" }] },
+        }));
+        const binding = { provider, method: "api_key", mode: "delegated", connectionId: "managed-connection", grantId: "managed-grant" };
+        expect(mockAgentsApi.testEnvironment).toHaveBeenCalledWith("company-new", adapterType, expect.objectContaining({ aiConnection: binding }));
+        expect(mockAgentsApi.hire).toHaveBeenCalledWith("company-new", expect.objectContaining({ adapterType, runtimeConfig: expect.objectContaining({ aiConnection: binding }) }));
+        expect(mockAdapterBuild.buildAdapterConfig).toHaveBeenLastCalledWith(expect.objectContaining({ model }));
+        expect(JSON.stringify(mockAgentsApi.hire.mock.calls)).not.toContain("custom-test-key");
+        expect(JSON.stringify(mockAgentsApi.testEnvironment.mock.calls)).not.toContain("custom-test-key");
+        expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).not.toContain("custom-test-key");
+        expect(mockAgentsApi.startClaudeSetupTokenLogin).not.toHaveBeenCalled();
+        expect(mockAgentsApi.startAdapterAuthLogin).not.toHaveBeenCalled();
+        expect(managedApi.connectLocal).not.toHaveBeenCalled();
+      } finally { await act(async () => root.unmount()); }
+    });
+
+    it("rejects an unsafe custom URL before saving or testing", async () => {
+      const { root } = await openStep4();
+      try {
+        await pickSource(/Custom API/);
+        await fillCustomApi("http://gateway.example.com/v1");
+        await pressArcPrimary();
+        expect(document.body.textContent).toContain("Enter an HTTPS base URL");
+        expect(managedApi.create).not.toHaveBeenCalled();
+        expect(mockAgentsApi.testEnvironment).not.toHaveBeenCalled();
+        expect(mockAgentsApi.hire).not.toHaveBeenCalled();
+      } finally { await act(async () => root.unmount()); }
+    });
+
+    it("supports an unauthenticated local custom endpoint without saving a key", async () => {
+      const { root } = await openStep4();
+      try {
+        await pickSource(/Custom API/);
+        await fillCustomApi("http://localhost:11434/v1");
+        await chooseCustomOption("onboarding-api-auth", "No authentication");
+        expect(document.getElementById("onboarding-custom-api-key")).toBeNull();
+        await pressArcPrimary();
+        expect(managedApi.create).toHaveBeenCalledWith("company-new", expect.objectContaining({ routing: expect.objectContaining({ auth: "none" }) }));
+        expect((managedApi.create.mock.calls[0] as unknown[])[1]).not.toHaveProperty("apiKey");
+        expect(mockAgentsApi.hire).toHaveBeenCalledTimes(1);
+      } finally { await act(async () => root.unmount()); }
+    });
+
+    it("retries a failed custom API probe without duplicating the saved connection", async () => {
+      mockAgentsApi.testEnvironment.mockResolvedValueOnce({ adapterType: "codex_local", status: "fail", checks: [{ code: "gateway_unreachable", level: "error", message: "Gateway unavailable" }], testedAt: new Date().toISOString() });
+      const { root } = await openStep4();
+      try {
+        await pickSource(/Custom API/);
+        await fillCustomApi();
+        await pressArcPrimary();
+        expect(mockAgentsApi.hire).not.toHaveBeenCalled();
+        expect(document.body.textContent).toContain("Gateway unavailable");
+        await pressArcPrimary();
+        expect(managedApi.create).toHaveBeenCalledTimes(1);
+        expect(mockAgentsApi.testEnvironment).toHaveBeenCalledTimes(2);
+        expect(mockAgentsApi.hire).toHaveBeenCalledTimes(1);
+      } finally { await act(async () => root.unmount()); }
+    });
+
+    it("stops if the custom connection cannot be saved", async () => {
+      managedApi.create.mockRejectedValueOnce(new Error("Could not save custom connection"));
+      const { root } = await openStep4();
+      try {
+        await pickSource(/Custom API/);
+        await fillCustomApi();
+        await pressArcPrimary();
+        expect(document.body.textContent).toContain("Could not save custom connection");
+        expect(mockAgentsApi.testEnvironment).not.toHaveBeenCalled();
+        expect(mockAgentsApi.hire).not.toHaveBeenCalled();
+      } finally { await act(async () => root.unmount()); }
+    });
+
+    it("does not reuse a passed probe or binding after the custom URL changes", async () => {
+      mockAgentsApi.hire.mockRejectedValueOnce(new Error("Temporary hire failure"));
+      const { root } = await openStep4();
+      try {
+        await pickSource(/Custom API/);
+        await fillCustomApi();
+        await pressArcPrimary();
+        await fillCustomApi("https://other.example.com/v1");
+        await pressArcPrimary();
+        expect(managedApi.create).toHaveBeenCalledTimes(2);
+        expect(managedApi.create).toHaveBeenLastCalledWith("company-new", expect.objectContaining({ routing: expect.objectContaining({ baseUrl: "https://other.example.com/v1" }) }));
+        expect(mockAgentsApi.testEnvironment).toHaveBeenCalledTimes(2);
+        expect(mockAgentsApi.hire).toHaveBeenCalledTimes(2);
+      } finally { await act(async () => root.unmount()); }
+    });
+
+    it("does not hire from a custom save that finishes after Back", async () => {
+      let resolveSave!: (result: { connectionId: string; grantId: string }) => void;
+      managedApi.create.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+      const { root } = await openStep4();
+      try {
+        await pickSource(/Custom API/);
+        await fillCustomApi();
+        await pressArcPrimary();
+        const back = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Back")!;
+        await act(async () => back.click());
+        await act(async () => resolveSave({ connectionId: "stale-connection", grantId: "stale-grant" }));
+        for (let i = 0; i < 8; i++) await flushReact();
+        expect(mockAgentsApi.testEnvironment).not.toHaveBeenCalled();
+        expect(mockAgentsApi.hire).not.toHaveBeenCalled();
+      } finally { await act(async () => root.unmount()); }
+    });
+
+    it("clears the custom key before returning to a native provider", async () => {
+      const { root } = await openStep4({ credentialMode: "api" });
+      try {
+        await pickSource(/Custom API/);
+        await fillCustomApi();
+        const back = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Back")!;
+        await act(async () => back.click());
+        for (let i = 0; i < 10; i++) await flushReact();
+        await pickSource(/OpenAI/);
+        expect(document.getElementById("onboarding-api-url")).toBeNull();
+        const key = document.querySelector('input[placeholder="Enter API key here"]') as HTMLInputElement;
+        expect(key.value).toBe("");
+        await act(async () => setControlledValue(key, "official-test-key"));
+        await pressArcPrimary();
+        expect(managedApi.create).toHaveBeenCalledWith("company-new", expect.objectContaining({ provider: "openai", apiKey: "official-test-key" }));
+        expect((managedApi.create.mock.calls[0] as unknown[])[1]).not.toHaveProperty("routing");
+      } finally { await act(async () => root.unmount()); }
+    });
 
     it("starts the claude_local sign-in on Connect when the signal reports no ready credential", async () => {
       mockAgentsApi.getAdapterAuthSignal.mockResolvedValue({ status: "absent" });

@@ -10,6 +10,21 @@ homes. Managed default/shared accounts are additional choices in that same
 selector. Selecting “Sign in to another account” survives background refreshes;
 Claude authorization paste keeps upstream's immediate Connecting feedback.
 
+First-run onboarding also offers **Custom API** on **Connect a model**. Enter
+the provider's Base URL, API key (or select no authentication), and exact model
+ID. Choose the endpoint's API format: Responses uses Codex, Anthropic Messages
+uses Claude, and Chat Completions uses OpenCode. The selected CLI must be
+available in the execution environment. Messages endpoints can use either a
+Bearer key or the `x-api-key` header.
+
+This path saves a company-scoped personal gateway connection and pins the agent
+to its returned connection and grant. It does not validate the key against an
+official provider URL. The existing execution-environment test runs before the
+hire; saving the connection alone does not prove the endpoint works. A failed
+probe can be retried without saving the same connection again. Custom form
+values and keys stay in memory, not the browser draft; re-enter them after a
+reload. Localhost URLs refer to the execution environment, not the browser.
+
 New-agent Connect offers three persistent tiles: the provider's subscription,
 the provider's API key, and Advanced. All three stay visible while the selected
 mode's form is shown below. Advanced opens the existing compatible-connection
@@ -54,7 +69,8 @@ selected company members or every company member. The separate agent-access
 setting determines which agents can use it. There is no additional AI agent
 authorization, and old delegation records do not override the human audience.
 
-A connection choice never changes the harness or model. For a routed connection,
+Outside the first-run Custom API form, a connection choice never changes the
+harness or model. For a routed connection,
 the selected connection owns its provider routing.
 Changing those separately may make a binding incompatible; saving then requires
 a compatible choice. Agent configuration cannot grant access to another account.

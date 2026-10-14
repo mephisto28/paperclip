@@ -129,6 +129,8 @@ import {
 import { AgentPreview } from "./onboarding/AgentPreview";
 import { ModelSourceTiles, type CredentialMode } from "./onboarding/ModelSourceTiles";
 import { CredentialModeLink } from "./onboarding/CredentialModeLink";
+import { OnboardingCustomApiFields } from "./onboarding/OnboardingCustomApiFields";
+import { CUSTOM_API_ADAPTERS, DEFAULT_CUSTOM_API, onboardingCustomApiInput, onboardingCustomApiModel } from "../lib/onboarding-custom-api";
 import { FooterNav, type FooterPrimaryIcon } from "./onboarding/FooterNav";
 import { OnboardingHeading } from "./onboarding/OnboardingPrimitives";
 import { DEFAULT_AGENT_ROLE } from "../lib/onboarding-agent-role";
@@ -140,6 +142,7 @@ import {
   Check,
   Loader2,
   ChevronDown,
+  Network,
 } from "lucide-react";
 
 type Step = 0 | 1 | 2 | 3 | 4 | 5;
@@ -684,6 +687,14 @@ function OnboardingWizardInner({
    * `localStorage`, and a provider key does not belong there.
    */
   const [apiKey, setApiKey] = useState("");
+  const [customApi, setCustomApi] = useState(saved?.customApi === true);
+  const [customApiDraft, setCustomApiDraft] = useState(() => ({
+    ...DEFAULT_CUSTOM_API,
+    protocol: saved?.customApi === true && saved?.adapterType === "claude_local" ? "messages" as const
+      : saved?.customApi === true && saved?.adapterType === "opencode_local" ? "chat" as const : "responses" as const,
+  }));
+  const customApiIdentity = JSON.stringify([customApiDraft, apiKey.trim()]);
+  const customApiConnectionRef = useRef<{ companyId: string; identity: string; binding: AiConnectionBinding } | null>(null);
   // The owner's stored Claude subscription login, read right before the hire
   // (see handleGiveHeartbeat). Onboarding applies it with no extra control,
   // so nothing else reads this state yet.
@@ -708,7 +719,7 @@ function OnboardingWizardInner({
     ? selectedSavedKey.id
     : savedKeys.options[0]?.id;
   const selectedApiKey = savedKeys.options.find((option) => option.id === selectedApiKeyId);
-  const credentialMode = credentialModeChoice ?? (
+  const credentialMode = customApi ? "api" : credentialModeChoice ?? (
     (savedKeys.subscriptions.length > 0 || (adapterType === "claude_local" && savedKeys.storedLogin.data))
       ? "subscription" : savedKeys.options.length || adapterType === "opencode_local" ? "api" : "subscription"
   );
@@ -764,6 +775,8 @@ function OnboardingWizardInner({
   const managedProvider = aiProviderForAdapter(adapterType);
   const managedSubscriptionProvider = managedProvider === "anthropic" || managedProvider === "openai" || managedProvider === "xai" ? managedProvider : undefined;
   function managedBindingForStep(): AiConnectionBinding | undefined {
+    if (customApi) return customApiConnectionRef.current?.companyId === createdCompanyId && customApiConnectionRef.current.identity === customApiIdentity
+      ? customApiConnectionRef.current.binding : undefined;
     if (credentialMode === "api") return selectedApiKey?.aiConnection ?? (
       !selectedApiKey && apiKeySecretRef.current?.companyId === createdCompanyId && apiKeySecretRef.current.envKey === apiKeyEnvKeyFor(adapterType)
         ? apiKeySecretRef.current.aiConnection : undefined);
@@ -800,6 +813,10 @@ function OnboardingWizardInner({
    * hand rather than the one before it.
    */
   function clearCompanyScopedState() {
+    setCustomApi(false);
+    setCustomApiDraft(DEFAULT_CUSTOM_API);
+    setApiKey("");
+    customApiConnectionRef.current = null;
     setAgentAppearance(randomAgentAppearance());
     setCreatedCompanyPrefix(null);
     setCompanyName("");
@@ -906,7 +923,7 @@ function OnboardingWizardInner({
       step, companyName,
       agentName, agentAppearance, agentRole, adapterType, cwd, model, command, args, url,
       // The mode, never the key: this blob is localStorage.
-      credentialMode, credentialModeChoice,
+      credentialMode, credentialModeChoice, customApi,
       createdCompanyId, createdCompanyPrefix, createdAgentId,
       createdCompanyGoalId, createdProjectId, createdIssueRef,
     };
@@ -914,7 +931,7 @@ function OnboardingWizardInner({
   }, [
     effectiveOnboardingOpen, step, companyName,
     agentName, agentAppearance, agentRole, adapterType, cwd, model, command, args, url,
-    credentialMode, credentialModeChoice,
+    credentialMode, credentialModeChoice, customApi,
     createdCompanyId, createdCompanyPrefix, createdAgentId,
     createdCompanyGoalId, createdProjectId, createdIssueRef,
   ]);
@@ -1034,7 +1051,7 @@ function OnboardingWizardInner({
       setAdapterEnvLoading(false);
     }
     return () => { connectAttemptRef.current++; };
-  }, [effectiveOnboardingOpen, createdCompanyId, adapterType, credentialMode, step]);
+  }, [effectiveOnboardingOpen, createdCompanyId, adapterType, credentialMode, customApi, customApiIdentity, step]);
 
   const canShowAdapterLogin = Boolean(
     adapterCaps.login != null &&
@@ -1155,7 +1172,9 @@ function OnboardingWizardInner({
    * no longer offers — a selection the customer cannot see.
    */
   const sourceSelected =
-    sourcePicked && recommendedAdapters.some((opt) => opt.type === adapterType);
+    sourcePicked && (customApi
+      ? !disabledTypes.has(CUSTOM_API_ADAPTERS[customApiDraft.protocol]) && adapterType === CUSTOM_API_ADAPTERS[customApiDraft.protocol]
+      : recommendedAdapters.some((opt) => opt.type === adapterType));
 
   /**
    * Whether the connect step may advance.
@@ -1174,7 +1193,7 @@ function OnboardingWizardInner({
    * Anything that gates this step belongs in here, so the next one is added
    * once rather than twice.
    */
-  const connectStepReady = sourceSelected && !adapterEnvLoading && !savedKeys.loading;
+  const connectStepReady = sourceSelected && !adapterEnvLoading && (customApi || !savedKeys.loading);
 
   /**
    * Whether this step has a sign-in to do before it can hire.
@@ -1385,7 +1404,9 @@ function OnboardingWizardInner({
                 label: "Connect",
                 icon: "arrow",
                 disabled:
-                  !connectStepReady || (credentialMode === "api" && !apiKey.trim() && !selectedApiKey),
+                  !connectStepReady || (customApi
+                    ? !customApiDraft.baseUrl.trim() || !customApiDraft.model.trim() || (customApiDraft.auth !== "none" && !apiKey.trim())
+                    : credentialMode === "api" && !apiKey.trim() && !selectedApiKey),
               }
           : // Nothing is chosen on arrival, and the row is what chooses. Until
             // it has been answered the button has nothing to do.
@@ -1541,7 +1562,7 @@ function OnboardingWizardInner({
     setAdapterEnvResult(null);
     adapterEnvResultAppliedStoredLoginRef.current = false;
     setAdapterEnvError(null);
-  }, [step, adapterType, model, command, args, url, credentialMode, apiKey, selectedSavedKey, selectedApiKey?.id, savedSubscription?.id]);
+  }, [step, adapterType, model, command, args, url, credentialMode, apiKey, customApi, customApiIdentity, selectedSavedKey, selectedApiKey?.id, savedSubscription?.id]);
 
   /**
    * Leaving the step puts the row back to a question.
@@ -1822,7 +1843,7 @@ function OnboardingWizardInner({
       ...defaultCreateValues,
       adapterType,
       model:
-        adapterType === "gemini_local"
+        customApi ? onboardingCustomApiModel(customApiDraft) : adapterType === "gemini_local"
           ? model || DEFAULT_GEMINI_LOCAL_MODEL
           : adapterType === "kimi_local"
             ? model || DEFAULT_KIMI_LOCAL_MODEL
@@ -1841,7 +1862,7 @@ function OnboardingWizardInner({
           ? DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX
           : defaultCreateValues.dangerouslyBypassSandbox
     });
-    if (adapterType === "claude_local" && forceUnsetAnthropicApiKey) {
+    if (!customApi && adapterType === "claude_local" && forceUnsetAnthropicApiKey) {
       const env =
         typeof config.env === "object" &&
         config.env !== null &&
@@ -1868,7 +1889,7 @@ function OnboardingWizardInner({
     // present. If storing failed this stays false, and the right outcome is a
     // configuration with no credential — which the hire then blocks on — rather
     // than one that quietly falls back to embedding the value.
-    if (!managedBindingForStep() && credentialMode === "api" && (bindApiKey || selectedApiKey)) {
+    if (!customApi && !managedBindingForStep() && credentialMode === "api" && (bindApiKey || selectedApiKey)) {
       const env =
         typeof config.env === "object" && config.env !== null && !Array.isArray(config.env)
           ? { ...(config.env as Record<string, unknown>) }
@@ -2018,6 +2039,7 @@ function OnboardingWizardInner({
   // doesn't hire a second agent.
   async function handleGiveHeartbeat() {
     if (!createdCompanyId) return;
+    if (customApi && !connectStepReady) return;
     // The grid and restore path both exclude native runner. Keep this final
     // guard at the mutation boundary so a stale or modified client cannot use
     // first-run onboarding to create a native agent.
@@ -2039,7 +2061,7 @@ function OnboardingWizardInner({
     setLoading(true);
     setError(null);
     try {
-      if (adapterType === "opencode_local") {
+      if (!customApi && adapterType === "opencode_local") {
         const selectedModelId = model.trim();
         if (!isValidOpenCodeModelId(selectedModelId)) {
           setError(
@@ -2090,7 +2112,17 @@ function OnboardingWizardInner({
       // hire describe it the same way — as a reference. A failure here stops the
       // hire rather than falling through to a configuration with no credential.
       let apiKeyStored = false;
-      if (credentialMode === "api" && !selectedApiKey && apiKey.trim()) {
+      if (customApi && !managedBindingForStep()) {
+        const input = onboardingCustomApiInput(customApiDraft, apiKey);
+        const connection = await aiConnectionsApi.create(createdCompanyId, input);
+        if (!isCurrent()) return;
+        customApiConnectionRef.current = {
+          companyId: createdCompanyId, identity: customApiIdentity,
+          binding: { provider: input.provider, method: "api_key", mode: "delegated", connectionId: connection.connectionId, grantId: connection.grantId },
+        };
+        void queryClient.invalidateQueries({ queryKey: ["ai-connections", createdCompanyId] });
+      }
+      if (!customApi && credentialMode === "api" && !selectedApiKey && apiKey.trim()) {
         apiKeyStored = await storeApiKeyUserSecret(createdCompanyId);
         if (!apiKeyStored || !isCurrent()) return;
       }
@@ -2673,14 +2705,16 @@ function OnboardingWizardInner({
                         question, and answering it is what opens the card. */}
                     <ModelSourceTiles
                       label="Model source"
-                      sources={recommendedAdapters.map((opt) => ({
+                      sources={[...recommendedAdapters.map((opt) => ({
                         id: opt.type,
                         label: CONNECT_SOURCE_NAMES[opt.type] ?? opt.label,
                         icon: <ModelSourceMark type={opt.type} Fallback={opt.icon} />,
-                      }))}
+                      })), ...(Object.values(CUSTOM_API_ADAPTERS).some((type) => !disabledTypes.has(type))
+                        ? [{ id: "custom-api", label: "Custom API", icon: <Network className="size-7" />, credentialMode: "advanced" as const }]
+                        : [])]}
                       mode={credentialMode}
                       selectedId={
-                        sourcePicked &&
+                        customApi && sourcePicked ? "custom-api" : sourcePicked &&
                         recommendedAdapters.some((opt) => opt.type === adapterType)
                           ? adapterType
                           : null
@@ -2691,6 +2725,20 @@ function OnboardingWizardInner({
                         if (connectPhase !== "idle") return;
                         autoConnectStartedRef.current = false;
                         setSourcePicked(true);
+                        setError(null);
+                        if (id === "custom-api") {
+                          if (!customApi) setApiKey("");
+                          const protocol = disabledTypes.has(CUSTOM_API_ADAPTERS[customApiDraft.protocol])
+                            ? (Object.keys(CUSTOM_API_ADAPTERS) as Array<keyof typeof CUSTOM_API_ADAPTERS>).find((p) => !disabledTypes.has(CUSTOM_API_ADAPTERS[p]))!
+                            : customApiDraft.protocol;
+                          setCustomApi(true);
+                          setCustomApiDraft((draft) => ({ ...draft, protocol, auth: draft.auth === "api_key" && protocol !== "messages" ? "bearer" : draft.auth }));
+                          setAdapterType(CUSTOM_API_ADAPTERS[protocol]);
+                          setConnectPhase("collapsing");
+                          return;
+                        }
+                        if (customApi) setApiKey("");
+                        setCustomApi(false);
                         setAdapterType(id);
                         if (id === "opencode_local") setModel(DEFAULT_OPENCODE_LOCAL_MODEL);
                         else if (id !== "codex_local") setModel("");
@@ -2769,6 +2817,15 @@ function OnboardingWizardInner({
                         <Loader2 className="size-4 animate-spin" />
                         {connectProgress}
                       </p>
+                    ) : customApi ? (
+                      <OnboardingCustomApiFields
+                        value={customApiDraft}
+                        onChange={(draft) => { setCustomApiDraft(draft); setAdapterType(CUSTOM_API_ADAPTERS[draft.protocol]); setError(null); }}
+                        apiKey={apiKey}
+                        onApiKeyChange={setApiKey}
+                        disabled={loading || adapterEnvLoading}
+                        disabledAdapters={disabledTypes}
+                      />
                     ) : credentialMode === "api" ? (
                       <OnboardingLoginCard
                         instruction={savedKeys.options.length ? "Choose a saved API key or enter a new one" : `Provide your ${

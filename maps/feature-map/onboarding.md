@@ -26,6 +26,8 @@ Open `/onboarding` or the onboarding launcher in an empty company context.
 Use `/<company-prefix>/onboarding` to resume an existing company's agent setup;
 the unprefixed route starts at organization naming on self-hosted instances.
 Cloud-managed instances reuse their existing company for agent setup.
+On **Connect a model**, choose **Custom API** to enter a Base URL, API format,
+authentication, and model ID. The format selects Codex, Claude, or OpenCode.
 
 ### `cli-setup`
 
@@ -38,6 +40,12 @@ Preconditions: follow the [baseline](./README.md#before-driving-a-journey). Use 
 ### `web-wizard`
 
 Automated: [wizard tests](../../ui/src/components/OnboardingWizard.test.tsx) cover mocked wizard behavior; [onboarding browser suite](../../tests/e2e/onboarding.spec.ts) supplies its own test environment. Live model execution is a separate check.
+
+- **Custom API.** The wizard tests cover gateway creation, explicit account
+  binding, protocol/model mapping, validation, and failed-probe retry. For live
+  verification, enter an authorized compatible endpoint and test key, connect,
+  and inspect the hired agent's model and connection. Run a small task through
+  that endpoint. Mocked tests do not prove gateway availability or CLI setup.
 
 - **Create company and resume.** Start a fresh empty instance and run doctor using
   the [verification skill](../../.agents/skills/verify-paperclip/SKILL.md). Run
@@ -64,6 +72,9 @@ Manual: Run setup in the disposable directory, open the URL it prints, and confi
 
 - An empty company, an empty instance, and an unauthenticated browser are different states.
 - Creating an agent does not prove its provider login or first execution succeeded.
+- Custom API keys and form values are not stored in the browser draft. Re-enter
+  them after reload. A localhost gateway must be reachable from the agent's
+  execution environment.
 - See [access](./access.md) for authenticated deployments and [agents](./agents.md) for later hiring.
 
 ### Storybook verification
