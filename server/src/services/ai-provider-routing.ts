@@ -16,6 +16,16 @@ export function managedProviderRouting(
   let codexConfig = "";
   let hermesConfig = "";
   const baseUrl = aiRoutingBaseUrl(route, harness);
+  if (baseUrl) {
+    try {
+      const host = new URL(baseUrl).hostname;
+      if (host) {
+        const noProxy = `127.0.0.1,localhost,${host}`;
+        env.NO_PROXY = noProxy;
+        env.no_proxy = noProxy;
+      }
+    } catch {}
+  }
   if (route.kind === "bedrock") {
     env.CLAUDE_CODE_USE_BEDROCK = "1";
     env.AWS_REGION = route.region!;
@@ -24,7 +34,7 @@ export function managedProviderRouting(
     env.AWS_BEARER_TOKEN_BEDROCK = credential;
   } else if (harness === "codex_local") {
     env.PAPERCLIP_AI_PROVIDER_KEY = credential;
-    codexConfig = `model_provider = "paperclip"\n[model_providers.paperclip]\nname = "Paperclip connection"\nbase_url = ${JSON.stringify(baseUrl)}\nwire_api = "responses"\nrequires_openai_auth = false\n${route.auth === "none" ? "" : 'env_key = "PAPERCLIP_AI_PROVIDER_KEY"\n'}`;
+    codexConfig = `model_provider = "paperclip"\n[analytics]\nenabled = false\n[model_providers.paperclip]\nname = "Paperclip connection"\nbase_url = ${JSON.stringify(baseUrl)}\nwire_api = "responses"\nrequires_openai_auth = false\n${route.auth === "none" ? "" : 'env_key = "PAPERCLIP_AI_PROVIDER_KEY"\n'}`;
   } else if (harness === "claude_local") {
     env.ANTHROPIC_BASE_URL = baseUrl;
     env[

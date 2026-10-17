@@ -62,7 +62,7 @@ export const aiProviderRoutingSchema = z
           url.password ||
           url.search ||
           url.hash ||
-          (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))
+          (url.protocol !== "https:" && url.protocol !== "http:")
         )
           throw new Error();
         if (route.kind === "local" && !loopback)

@@ -197,11 +197,15 @@ if (tailscaleAuth || bindMode) {
   } else {
     delete env.PAPERCLIP_BIND_HOST;
   }
-  if (effectiveBind === "loopback" && !tailscaleAuth) {
-    delete env.PAPERCLIP_DEPLOYMENT_MODE;
+  if ((effectiveBind === "loopback" && !tailscaleAuth) || process.env.PAPERCLIP_DEPLOYMENT_MODE === "local_trusted") {
+    if (process.env.PAPERCLIP_DEPLOYMENT_MODE === "local_trusted") {
+      env.PAPERCLIP_DEPLOYMENT_MODE = "local_trusted";
+    } else {
+      delete env.PAPERCLIP_DEPLOYMENT_MODE;
+    }
     delete env.PAPERCLIP_DEPLOYMENT_EXPOSURE;
     delete env.PAPERCLIP_AUTH_BASE_URL_MODE;
-    console.log("[paperclip] dev mode: local_trusted (bind=loopback)");
+    console.log(`[paperclip] dev mode: local_trusted (bind=${effectiveBind})`);
   } else {
     env.PAPERCLIP_DEPLOYMENT_MODE = "authenticated";
     env.PAPERCLIP_DEPLOYMENT_EXPOSURE = "private";

@@ -150,24 +150,27 @@ done`,
       );
     return;
   }
+  const homeDir = os.homedir();
   let directory =
     typeof config.cwd === "string" ? path.resolve(config.cwd) : process.cwd();
   for (;;) {
-    for (const relative of files) {
-      try {
-        const content = await readFile(path.join(directory, relative), "utf8");
-        if (
-          /apiKeyHelper|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|OPENAI_API_KEY|model_provider\s*=|env_key\s*=|experimental_bearer_token|cli_auth_credentials_store/.test(
-            content,
-          )
-        ) {
-          throw unprocessable(
-            "Project authentication settings conflict with the selected AI connection",
-            { code: "ai_connection_incompatible" },
-          );
+    if (directory !== homeDir) {
+      for (const relative of files) {
+        try {
+          const content = await readFile(path.join(directory, relative), "utf8");
+          if (
+            /apiKeyHelper|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|OPENAI_API_KEY|model_provider\s*=|env_key\s*=|experimental_bearer_token|cli_auth_credentials_store/.test(
+              content,
+            )
+          ) {
+            throw unprocessable(
+              "Project authentication settings conflict with the selected AI connection",
+              { code: "ai_connection_incompatible" },
+            );
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
     }
     const parent = path.dirname(directory);
